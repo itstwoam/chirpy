@@ -1,0 +1,29 @@
+
+
+cmd/chirpy/
+main.go — parse config/flags, init deps, start server
+internal/http/
+server.go — build and configure http.Server, routes, middleware
+handlers.go — HTTP handlers (optionally split by feature)
+middleware.go
+internal/chirp/ — business logic for chirps (create, list, validate)
+service.go
+model.go
+internal/auth/ — authentication/authorization logic
+service.go
+tokens.go
+internal/store/ — data access (file/DB)
+store.go
+migrations/ — if needed
+internal/config/
+config.go — load env/config
+internal/log/
+logger.go — structured logger wrapper
+pkg/ — only if you intend to export APIs for other modules
+test/ — integration/e2e helpers
+Guiding principles:
+
+main.go does wiring only; no business logic.
+internal/ keeps implementation unexported outside the module.
+Group by domain (chirp, auth, store), not by layer only.
+Keep handlers thin: validate/translate HTTP, call services, return results.
