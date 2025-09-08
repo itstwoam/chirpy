@@ -2,7 +2,7 @@ package main
 
 import (
 	"fmt"
-	"github.com/itstwoam/internal/server"
+	"github.com/itstwoam/chirpy/internal/server"
 )
 
 func main() {
