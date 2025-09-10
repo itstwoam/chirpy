@@ -37,9 +37,9 @@ func StartServer() {
 	fs := http.FileServer(http.Dir("./internal/app"))
 	//mux.Handle("/app/", http.StripPrefix("/app", fs))
 	mux.Handle("/app/", cfg.middlewareInc(http.StripPrefix("/app", fs)))
-	mux.HandleFunc("/healthz", serveStatus)
-	mux.HandleFunc("/metrics", cfg.serveHits)
-	mux.HandleFunc("/reset", cfg.serveReset)
+	mux.HandleFunc("GET /healthz", serveStatus)
+	mux.HandleFunc("GET /metrics", cfg.serveHits)
+	mux.HandleFunc("POST /reset", cfg.serveReset)
 	server := http.Server{}
 	server.Handler = mux
 	server.Addr = ":8085"
