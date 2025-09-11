@@ -3,7 +3,7 @@ package server
 import (
 	"net/http"
 	"fmt"
-	"strconv"
+	//"strconv"
 	"sync/atomic"
 )
 
@@ -19,10 +19,12 @@ func (cfg *apiConfig) middlewareInc(next http.Handler) http.Handler {
 }
 
 func (cfg *apiConfig) serveHits(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+	w.Header().Set("Content-Type", "text/html")
 	w.WriteHeader(http.StatusOK)
 	hits := cfg.fileserverHits.Load()
-	w.Write([]byte("Hits: "+ strconv.Itoa(int(hits))))
+	//w.Write([]byte("Hits: "+ strconv.Itoa(int(hits))))
+	w.Write([]byte(fmt.Sprintf("<html><body><h1>Welcome, Chirpy Admin</h1><p>Chirpy has been visited %d times!</p></body></html>", hits)))
+
 }
 
 func (cfg *apiConfig) serveReset(w http.ResponseWriter, r *http.Request) {
@@ -37,9 +39,9 @@ func StartServer() {
 	fs := http.FileServer(http.Dir("./internal/app"))
 	//mux.Handle("/app/", http.StripPrefix("/app", fs))
 	mux.Handle("/app/", cfg.middlewareInc(http.StripPrefix("/app", fs)))
-	mux.HandleFunc("GET /healthz", serveStatus)
-	mux.HandleFunc("GET /metrics", cfg.serveHits)
-	mux.HandleFunc("POST /reset", cfg.serveReset)
+	mux.HandleFunc("GET /api/healthz", serveStatus)
+	mux.HandleFunc("GET /admin/metrics", cfg.serveHits)
+	mux.HandleFunc("POST /admin/reset", cfg.serveReset)
 	server := http.Server{}
 	server.Handler = mux
 	server.Addr = ":8085"
