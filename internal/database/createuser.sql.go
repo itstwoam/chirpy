@@ -13,26 +13,35 @@ import (
 )
 
 const createUser = `-- name: CreateUser :one
-INSERT INTO users (id, created_at, updated_at, email)
-VALUES ($1, $2, $3, $4)
+INSERT INTO users (id, created_at, updated_at, email, hashed_password)
+VALUES ($1, $2, $3, $4, $5)
 RETURNING id, created_at, updated_at, email
 `
 
 type CreateUserParams struct {
+	ID             uuid.UUID `json:"id"`
+	CreatedAt      time.Time `json:"created_at"`
+	UpdatedAt      time.Time `json:"updated_at"`
+	Email          string    `json:"email"`
+	HashedPassword string    `json:"hashed_password"`
+}
+
+type CreateUserRow struct {
 	ID        uuid.UUID `json:"id"`
 	CreatedAt time.Time `json:"created_at"`
 	UpdatedAt time.Time `json:"updated_at"`
 	Email     string    `json:"email"`
 }
 
-func (q *Queries) CreateUser(ctx context.Context, arg CreateUserParams) (User, error) {
+func (q *Queries) CreateUser(ctx context.Context, arg CreateUserParams) (CreateUserRow, error) {
 	row := q.db.QueryRowContext(ctx, createUser,
 		arg.ID,
 		arg.CreatedAt,
 		arg.UpdatedAt,
 		arg.Email,
+		arg.HashedPassword,
 	)
-	var i User
+	var i CreateUserRow
 	err := row.Scan(
 		&i.ID,
 		&i.CreatedAt,

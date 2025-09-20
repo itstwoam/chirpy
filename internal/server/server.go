@@ -13,14 +13,26 @@ import (
 	"github.com/google/uuid"
 	"time"
 	"errors"
+	"github.com/itstwoam/chirpy/internal/auth"
 )
+type CleanUser struct {
+	ID uuid.UUID `json:"user_id"`
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
+	Email string `json:email"`
+}
 
-type newchirp struct {
+type UserLoginPost struct {
+		Password string `json:"password"`
+		Email string `json:"email"`
+}
+
+type Newchirp struct {
 	Body string `json:"body"`
 	ID uuid.UUID `json:"user_id"`
 }
 
-type badchirp struct {
+type BadChirp struct {
 	Error string `json:"error"`
 }
 
@@ -89,9 +101,10 @@ func (s *state) getChirp(w http.ResponseWriter, r *http.Request) {
 	WriteJSONResponse(w, aChirp, 200, -1)
 	return
 }
+
 func (s *state) serveChirp(w http.ResponseWriter, r *http.Request) {
 	decoder := json.NewDecoder(r.Body)
-	chirps := newchirp{}
+	chirps := Newchirp{}
 	err := decoder.Decode(&chirps)
 	if err != nil {
 		type errResponse struct {
@@ -137,7 +150,7 @@ func (s *state) serveChirp(w http.ResponseWriter, r *http.Request) {
 	})
 	if err != nil {
 		fmt.Printf("Unable to create chirp: %v", err)
-		errResponse := badchirp{}
+		errResponse := BadChirp{}
 		errResponse.Error = "Unable to create chirp"
 		WriteJSONResponse(w, errResponse, 401, -1)
 		return
@@ -169,6 +182,7 @@ func StartServer(dbURL string, devEnv string) {
 	mux.HandleFunc("POST /api/chirps", curState.serveChirp)
 	mux.HandleFunc("GET /api/chirps", curState.getChirps)
 	mux.HandleFunc("GET /api/chirps/{chirpID}", curState.getChirp)
+	mux.HandleFunc("POST /api/login", curState.serveLogin)
 	server := http.Server{}
 	server.Handler = mux
 	server.Addr = ":8085"
@@ -185,25 +199,69 @@ func serveStatus(w http.ResponseWriter, r *http.Request) {
 	w.Write([]byte("OK"))
 }
 
-func (s *state) serveUsers(w http.ResponseWriter, r *http.Request) {
-	type chirp struct {
-		Email string `json:"email"`
-	}
+func (s *state) serveLogin(w http.ResponseWriter, r *http.Request) {
 	decoder := json.NewDecoder(r.Body)
-	chirps := chirp{}
-	err := decoder.Decode(&chirps)
+	newUser := UserLoginPost{} //non hashed password
+	err := decoder.Decode(&newUser)
 	if err != nil {
-		type errResponse struct {
-			Error string `json:"error"`
+		respBody := BadChirp{
+			Error: "Malformed login request",
 		}
-		respBody := errResponse{
+		WriteJSONResponse(w, respBody, 422, 500)
+		return
+	}
+	user, err := s.db.GetUserByEmail(r.Context(), newUser.Email)// hashed password 
+	if err != nil {
+		respBody := BadChirp{
+			Error: "Couldn't find user",
+		}
+		WriteJSONResponse(w, respBody, 422, 500)
+		return
+	}
+	isValid := auth.CheckPasswordHash(newUser.Password, user.HashedPassword)
+	if isValid != nil {
+		respBody := BadChirp{
+			Error: "Incorrect email or password",
+		}
+		WriteJSONResponse(w, respBody, 401, 500)
+	} else {
+		respBody := CleanUser {
+			ID: user.ID,
+			CreatedAt: user.CreatedAt,
+			UpdatedAt: user.UpdatedAt,
+			Email: user.Email,
+		}
+		WriteJSONResponse(w, respBody, 200, -1)
+	}
+}
+
+func (s *state) serveUsers(w http.ResponseWriter, r *http.Request) {
+	decoder := json.NewDecoder(r.Body)
+	newUser := UserLoginPost{}
+	err := decoder.Decode(&newUser)
+	if err != nil {
+		respBody := BadChirp{
 			Error: "Malformed Post request",
 		}
 		WriteJSONResponse(w, respBody, 422, 500)
 		return
 	}
-	
-	response, err:= s.db.CreateUser(r.Context(), database.CreateUserParams{ ID: uuid.New(), CreatedAt: time.Now(), UpdatedAt: time.Now(), Email:chirps.Email,})
+	if len(newUser.Password) < 5 {
+		respBody := BadChirp{
+			Error: "Password length below minimum",
+		}
+		WriteJSONResponse(w, respBody, 422, 500)
+		return
+	}
+	hashWord, err := auth.HashPassword(newUser.Password)
+	if err != nil {
+		respBody := BadChirp{
+			Error: "Error processing password",
+		}
+		WriteJSONResponse(w, respBody, 422, 500)
+		return
+	}
+	response, err:= s.db.CreateUser(r.Context(), database.CreateUserParams{ ID: uuid.New(), CreatedAt: time.Now(), UpdatedAt: time.Now(), Email:newUser.Email, HashedPassword: hashWord})
 	if err != nil {
 		fmt.Printf("error registering new user: %v\n", err)
 		return
