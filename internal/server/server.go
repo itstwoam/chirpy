@@ -3,7 +3,6 @@ package server
 import (
 	"net/http"
 	"fmt"
-	//"strconv"
 	"sync/atomic"
 	"encoding/json"
 	"log"
@@ -70,15 +69,7 @@ func (s *state) getChirps(w http.ResponseWriter, r *http.Request) {
 		fmt.Println("error while retrieving chirps")
 		return
 	}
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(200)
-	response, err := json.Marshal(allChirps)
-	if err != nil {
-		log.Printf("Error marshalling chirps: %v", err)
-		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
-		return
-	}
-	w.Write(response)
+	WriteJSONResponse(w, allChirps, 200, -1)
 	return
 }
 
@@ -95,14 +86,7 @@ func (s *state) getChirp(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(404)
 		return
 	}
-	response, err := json.Marshal(aChirp)
-	if err != nil {
-		log.Printf("Error marshalling chirp: %v", err)
-		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
-		return
-	}
-	w.WriteHeader(200)
-	w.Write(response)
+	WriteJSONResponse(w, aChirp, 200, -1)
 	return
 }
 func (s *state) serveChirp(w http.ResponseWriter, r *http.Request) {
@@ -116,17 +100,7 @@ func (s *state) serveChirp(w http.ResponseWriter, r *http.Request) {
 		respBody := errResponse{
 			Error: "Malformed Post request",
 		}
-		dat, err := json.Marshal(respBody)
-		if err != nil {
-			log.Printf("Error marshalling JSON: %s", err)
-			w.Header().Set("Content-Type", "application/json")
-			w.WriteHeader(500)
-			return
-		}
-		//process error here
-		w.WriteHeader(422)
-		w.Header().Set("Content-Type", "application/json")
-		w.Write(dat)
+		WriteJSONResponse(w, respBody, 422, 500)
 		return
 	}
 	if len(chirps.Body) > 140{
@@ -136,15 +110,7 @@ func (s *state) serveChirp(w http.ResponseWriter, r *http.Request) {
 		respBody := errResponse {
 			Error: "Chirp is too long",
 		}
-		w.WriteHeader(400)
-		dat, err := json.Marshal(respBody)
-		if err != nil {
-			log.Printf("error marshalling JSON: %s", err)
-			w.WriteHeader(500)
-			return
-		}
-		w.Header().Set("Content-Type", "application/json")
-		w.Write(dat)
+		WriteJSONResponse(w, respBody, 400, 500)
 		return
 	}
 	final := ""
@@ -160,7 +126,6 @@ func (s *state) serveChirp(w http.ResponseWriter, r *http.Request) {
 		}
 		final += words[idx]
 	}
-	w.WriteHeader(201)
 	chirps.Body = final
 	timenow := time.Now()
 	Chirp, err := s.db.CreateChirp(r.Context(), database.CreateChirpParams {
@@ -174,20 +139,10 @@ func (s *state) serveChirp(w http.ResponseWriter, r *http.Request) {
 		fmt.Printf("Unable to create chirp: %v", err)
 		errResponse := badchirp{}
 		errResponse.Error = "Unable to create chirp"
-		dat, _ := json.Marshal(errResponse)
-		w.WriteHeader(401)
-		w.Header().Set("Content-Type", "application/json")
-		w.Write(dat)
+		WriteJSONResponse(w, errResponse, 401, -1)
 		return
 	}
-	dat, err := json.Marshal(Chirp)
-	if err != nil {
-		log.Printf("Error marshalling JSON: %s", err)
-		w.WriteHeader(500)
-		return
-	}
-	w.Header().Set("Content-Type", "application/json")
-	w.Write(dat)
+	WriteJSONResponse(w, Chirp, 201, 500)
 	return
 }
 
@@ -202,12 +157,10 @@ func StartServer(dbURL string, devEnv string) {
 		fmt.Println("could not retrieve config file")
 		return
 	}
-	//db, err := sql.Open("postgres", curState.cfg.DB_url)
 	db, err := sql.Open("postgres", dbURL)
 	curState.db = database.New(db)
 	mux := http.NewServeMux()
 	fs := http.FileServer(http.Dir("./internal/app"))
-	//mux.Handle("/app/", http.StripPrefix("/app", fs))
 	mux.Handle("/app/", curState.middlewareInc(http.StripPrefix("/app", fs)))
 	mux.HandleFunc("POST /api/users", curState.serveUsers)
 	mux.HandleFunc("GET /api/healthz", serveStatus)
@@ -246,17 +199,7 @@ func (s *state) serveUsers(w http.ResponseWriter, r *http.Request) {
 		respBody := errResponse{
 			Error: "Malformed Post request",
 		}
-		dat, err := json.Marshal(respBody)
-		if err != nil {
-			log.Printf("Error marshalling JSON: %s", err)
-			w.Header().Set("Content-Type", "application/json")
-			w.WriteHeader(500)
-			return
-		}
-		//process error here
-		w.WriteHeader(422)
-		w.Header().Set("Content-Type", "application/json")
-		w.Write(dat)
+		WriteJSONResponse(w, respBody, 422, 500)
 		return
 	}
 	
@@ -266,15 +209,11 @@ func (s *state) serveUsers(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	
-	dat, err := json.Marshal(response)
+	WriteJSONResponse(w, response, 201, -1)
 	if err != nil {
-		log.Printf("Error marshalling JSON: %s", err)
-		w.WriteHeader(500)
+		fmt.Errorf("failed to write reponse: %v", err)
 		return
 	}
-	w.WriteHeader(201)
-	w.Header().Set("Content-Type", "application/json")
-	w.Write(dat)
 	return
 }
 
@@ -284,4 +223,28 @@ func GetUUID(s string) (uuid.UUID, error) {
 		return uuid.UUID{}, errors.New("in GetUUID, could not parse UUID")
 	}
 	return theUUID, nil
+}
+
+func WriteJSONResponse(w http.ResponseWriter, t any, code int, ecode int) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(code)
+	data, err := json.Marshal(t)
+	if err != nil {
+		if ecode != -1 {
+			w.WriteHeader(ecode)
+		}
+		fmt.Errorf("error in marshalling JSON: %w", err)
+		return
+	}
+	_, writeErr := w.Write(data)
+	if writeErr != nil {
+		errMsg := "error writing response: %v"
+		log.Printf(errMsg, writeErr)
+		if ecode != -1 {
+			w.WriteHeader(ecode)
+		}
+		fmt.Errorf(errMsg, writeErr)
+		return
+	}
+	return
 }
