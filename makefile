@@ -5,7 +5,7 @@ run: build
 	./chirpy
 
 clean:
-	rm -f chripy
+	rm -f chirpy
 
 dev:
-	go build -o chripy . && ./chripy
+	go build -o chirpy . && ./chirpy

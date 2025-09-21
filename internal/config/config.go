@@ -8,6 +8,7 @@ import ("os"
 
 type Config struct {
 	DB_url	string	`json:"db_url"`
+	Default_Expiry int `json:"default_expiry"`
 }
 
 const configFileName = ".chirpy.json"
@@ -19,6 +20,7 @@ func Read() (*Config, error){
 		fmt.Println("in Read, error from getConfigFilePath()")
 		return nil, err
 	}
+	fmt.Println("filePath: ",filePath)
 	file, err := os.Open(filePath)
 	if err != nil{
 		fmt.Println("in Read, error from os.Open")

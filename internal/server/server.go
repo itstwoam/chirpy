@@ -15,21 +15,24 @@ import (
 	"errors"
 	"github.com/itstwoam/chirpy/internal/auth"
 )
+
 type CleanUser struct {
 	ID uuid.UUID `json:"user_id"`
 	CreatedAt time.Time `json:"created_at"`
 	UpdatedAt time.Time `json:"updated_at"`
-	Email string `json:email"`
+	Email string `json:"email"`
+	Token string `json:"token"`
 }
 
 type UserLoginPost struct {
-		Password string `json:"password"`
-		Email string `json:"email"`
+	Password string `json:"password"`
+	Email string `json:"email"`
+	Expires_in_seconds int `json:"expires,omitempty"`
 }
 
 type Newchirp struct {
 	Body string `json:"body"`
-	ID uuid.UUID `json:"user_id"`
+	Token string `json:"token"`
 }
 
 type BadChirp struct {
@@ -41,6 +44,7 @@ type state struct {
 	cfg *config.Config `json:"cfg"`
 	fileserverHits atomic.Int32 `json:"fileserverHits"`
 	environType string `json:"environtype"`
+	key string `json:"key"`
 }
 	
 var blacklist = []string {"kerfuffle", "sharbert", "fornax"}
@@ -70,9 +74,10 @@ func (s *state) serveReset(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	fmt.Printf("Deleted %v users.", numDeleted)
-	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
-	w.WriteHeader(http.StatusOK)
 	s.fileserverHits.Store(0)
+	WriteHTTPResponse(w, "", http.StatusOK)
+	//w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+	//w.WriteHeader(http.StatusOK)
 }
 
 func (s *state) getChirps(w http.ResponseWriter, r *http.Request) {
@@ -107,20 +112,26 @@ func (s *state) serveChirp(w http.ResponseWriter, r *http.Request) {
 	chirps := Newchirp{}
 	err := decoder.Decode(&chirps)
 	if err != nil {
-		type errResponse struct {
-			Error string `json:"error"`
-		}
-		respBody := errResponse{
+		respBody := BadChirp{
 			Error: "Malformed Post request",
 		}
 		WriteJSONResponse(w, respBody, 422, 500)
 		return
 	}
+	token, err := auth.GetBearerToken(r.Header)
+	if err != nil {
+		fmt.Println("Unauthorized due to failure in token retrieval")
+		WriteHTTPResponse(w, "Unathorized", 401)
+		return
+	}
+	uID, err := auth.ValidateJWT(token, s.key)
+	if err != nil {
+		fmt.Println("Unauthorized due to failure in userID retrieval")
+		WriteHTTPResponse(w, "Unauthorized", 401)
+		return
+	}
 	if len(chirps.Body) > 140{
-		type errResponse struct {
-			Error string `json:"error"`
-		}
-		respBody := errResponse {
+		respBody := BadChirp {
 			Error: "Chirp is too long",
 		}
 		WriteJSONResponse(w, respBody, 400, 500)
@@ -146,7 +157,7 @@ func (s *state) serveChirp(w http.ResponseWriter, r *http.Request) {
 		CreatedAt: timenow,
 		UpdatedAt: timenow,
 		Body: chirps.Body,
-		UserID: chirps.ID,
+		UserID: uID,
 	})
 	if err != nil {
 		fmt.Printf("Unable to create chirp: %v", err)
@@ -159,11 +170,10 @@ func (s *state) serveChirp(w http.ResponseWriter, r *http.Request) {
 	return
 }
 
-
-
-func StartServer(dbURL string, devEnv string) {
+func StartServer(dbURL string, devEnv string, key string) {
 	var curState state
 	curState.environType = devEnv
+	curState.key = key
 	var err error
 	curState.cfg, err = config.Read()
 	if err != nil{
@@ -194,9 +204,10 @@ func StartServer(dbURL string, devEnv string) {
 }
 
 func serveStatus(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
-	w.WriteHeader(200)
-	w.Write([]byte("OK"))
+	WriteHTTPResponse(w, "OK", 200)
+	//w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+	//w.WriteHeader(200)
+	//w.Write([]byte("OK"))
 }
 
 func (s *state) serveLogin(w http.ResponseWriter, r *http.Request) {
@@ -224,15 +235,20 @@ func (s *state) serveLogin(w http.ResponseWriter, r *http.Request) {
 			Error: "Incorrect email or password",
 		}
 		WriteJSONResponse(w, respBody, 401, 500)
-	} else {
-		respBody := CleanUser {
-			ID: user.ID,
-			CreatedAt: user.CreatedAt,
-			UpdatedAt: user.UpdatedAt,
-			Email: user.Email,
-		}
-		WriteJSONResponse(w, respBody, 200, -1)
+		return
 	}
+	if newUser.Expires_in_seconds == 0 {
+		newUser.Expires_in_seconds = s.cfg.Default_Expiry
+	}
+	token, err := auth.MakeJWT(user.ID, s.key, newUser.Expires_in_seconds)
+	respBody := CleanUser {
+		ID: user.ID,
+		CreatedAt: user.CreatedAt,
+		UpdatedAt: user.UpdatedAt,
+		Email: user.Email,
+		Token: token,
+	}
+	WriteJSONResponse(w, respBody, 200, -1)
 }
 
 func (s *state) serveUsers(w http.ResponseWriter, r *http.Request) {
@@ -305,4 +321,12 @@ func WriteJSONResponse(w http.ResponseWriter, t any, code int, ecode int) {
 		return
 	}
 	return
+}
+
+func WriteHTTPResponse(w http.ResponseWriter, reason string, code int) {
+	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+	w.WriteHeader(code)
+	if reason != "" {
+		w.Write([]byte(reason))
+	}
 }
