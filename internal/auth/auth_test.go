@@ -2,8 +2,6 @@ package auth
 
 import (
 	"testing"
-	"time"
-
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/google/uuid"
 )
@@ -11,7 +9,7 @@ import (
 func TestMakeJWT(t *testing.T) {
 	userID := uuid.New()
 	secret := "test-secret"
-	expires := time.Hour
+	expires := 3600
 
 	tokenStr, err := MakeJWT(userID, secret, expires)
 	if err != nil {
