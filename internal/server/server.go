@@ -44,11 +44,11 @@ type BadChirp struct {
 }
 
 type state struct {
-	db *database.Queries `json:"db"`
-	cfg *config.Config `json:"cfg"`
-	fileserverHits atomic.Int32 `json:"fileserverHits"`
-	environType string `json:"environtype"`
-	key string `json:"key"`
+	db *database.Queries //`json:"db"`
+	cfg *config.Config //`json:"cfg"`
+	fileserverHits atomic.Int32 //`json:"fileserverHits"`
+	environType string //`json:"environtype"`
+	key string //`json:"key"`
 }
 	
 var blacklist = []string {"kerfuffle", "sharbert", "fornax"}
@@ -243,7 +243,8 @@ func (s *state) serveRefresh(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		WriteHTTPResponse(w, "", 401)
 	}
-	if refresh.ExpiresAt.Before(time.Now()) {
+	//eTime := NewValidTime(time.Now())
+	if refresh.ExpiresAt.Before(time.Now()) || (refresh.RevokedAt.Valid && refresh.RevokedAt.Time.Before(time.Now())) {
 		WriteHTTPResponse(w, "", 401)
 	}
 	token, err := auth.MakeJWT(refresh.UserID, s.key, s.cfg.Default_Expiry)
@@ -342,12 +343,7 @@ func (s *state) serveUsers(w http.ResponseWriter, r *http.Request) {
 		fmt.Printf("error registering new user: %v\n", err)
 		return
 	}
-	
 	WriteJSONResponse(w, response, 201, -1)
-	if err != nil {
-		fmt.Errorf("failed to write reponse: %v", err)
-		return
-	}
 	return
 }
 
@@ -361,23 +357,19 @@ func GetUUID(s string) (uuid.UUID, error) {
 
 func WriteJSONResponse(w http.ResponseWriter, t any, code int, ecode int) {
 	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(code)
 	data, err := json.Marshal(t)
 	if err != nil {
 		if ecode != -1 {
 			w.WriteHeader(ecode)
 		}
-		fmt.Errorf("error in marshalling JSON: %w", err)
+		log.Printf("error in marshalling JSON: %v", err)
 		return
 	}
+	w.WriteHeader(code)
 	_, writeErr := w.Write(data)
 	if writeErr != nil {
 		errMsg := "error writing response: %v"
 		log.Printf(errMsg, writeErr)
-		if ecode != -1 {
-			w.WriteHeader(ecode)
-		}
-		fmt.Errorf(errMsg, writeErr)
 		return
 	}
 	return

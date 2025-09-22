@@ -36,11 +36,8 @@ func TestMakeJWT(t *testing.T) {
 }
 
 func TestMakeRefreshToken(t *testing.T) {
-	key, err := MakeRefreshToken()
+	key := MakeRefreshToken()
 	fmt.Println(key)
-	if err != nil {
-		t.Fatalf("MakeRefreshToken failed: %v", err)
-	}
 	if len(key) != 64 {
 		t.Fatalf("Key length is %v, when it should be 32", len(key))
 	}
