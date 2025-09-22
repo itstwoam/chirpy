@@ -1,6 +1,7 @@
 package auth
 
 import (
+	"fmt"
 	"testing"
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/google/uuid"
@@ -33,3 +34,15 @@ func TestMakeJWT(t *testing.T) {
 		t.Errorf("Expected subject %s, got %s", userID.String(), claims.Subject)
 	}
 }
+
+func TestMakeRefreshToken(t *testing.T) {
+	key, err := MakeRefreshToken()
+	fmt.Println(key)
+	if err != nil {
+		t.Fatalf("MakeRefreshToken failed: %v", err)
+	}
+	if len(key) != 64 {
+		t.Fatalf("Key length is %v, when it should be 32", len(key))
+	}
+}
+

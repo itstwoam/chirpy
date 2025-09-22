@@ -1,5 +1,6 @@
 package server
 
+
 import (
 	"net/http"
 	"fmt"
@@ -15,6 +16,9 @@ import (
 	"errors"
 	"github.com/itstwoam/chirpy/internal/auth"
 )
+type RefreshResponse struct {
+	Token string `json:"token"`
+}
 
 type CleanUser struct {
 	ID uuid.UUID `json:"user_id"`
@@ -22,12 +26,12 @@ type CleanUser struct {
 	UpdatedAt time.Time `json:"updated_at"`
 	Email string `json:"email"`
 	Token string `json:"token"`
+	Refresh string `json:"refresh_token"`
 }
 
 type UserLoginPost struct {
 	Password string `json:"password"`
 	Email string `json:"email"`
-	Expires_in_seconds int `json:"expires,omitempty"`
 }
 
 type Newchirp struct {
@@ -193,6 +197,8 @@ func StartServer(dbURL string, devEnv string, key string) {
 	mux.HandleFunc("GET /api/chirps", curState.getChirps)
 	mux.HandleFunc("GET /api/chirps/{chirpID}", curState.getChirp)
 	mux.HandleFunc("POST /api/login", curState.serveLogin)
+	mux.HandleFunc("POST /api/refresh", curState.serveRefresh)
+	mux.HandleFunc("POST /api/revoke", curState.serveRevoke)
 	server := http.Server{}
 	server.Handler = mux
 	server.Addr = ":8085"
@@ -203,11 +209,52 @@ func StartServer(dbURL string, devEnv string, key string) {
 	fmt.Println("Am I still running?")
 }
 
+func (s *state)serveRevoke(w http.ResponseWriter, r *http.Request) {
+	rToken, err := auth.GetBearerToken(r.Header)
+	if err != nil {
+		WriteHTTPResponse(w, "", 501)
+		return
+	}
+	//refresh, err = s.db.AddRefresh(r.Context(), database.AddRefreshParams{ Token: refreshT, CreatedAt: curTime, UpdatedAt: curTime, UserID: user.ID, ExpiresAt: expireTime})
+	nowTime := NewValidTime(time.Now())
+	_, err = s.db.RevokeByRefresh(r.Context(), database.RevokeByRefreshParams{ Token: rToken, RevokedAt: nowTime})
+	if err != nil {
+		WriteHTTPResponse(w, "", 500)
+		return
+	}
+	WriteHTTPResponse(w, "", 204)
+	return
+}
+
 func serveStatus(w http.ResponseWriter, r *http.Request) {
 	WriteHTTPResponse(w, "OK", 200)
 	//w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 	//w.WriteHeader(200)
 	//w.Write([]byte("OK"))
+}
+
+func (s *state) serveRefresh(w http.ResponseWriter, r *http.Request) {
+	rToken, err := auth.GetBearerToken(r.Header)
+	if err != nil {
+		WriteHTTPResponse(w, "", 501)
+		return
+	}
+	refresh, err := s.db.GetRefreshByToken(r.Context(), rToken)
+	if err != nil {
+		WriteHTTPResponse(w, "", 401)
+	}
+	if refresh.ExpiresAt.Before(time.Now()) {
+		WriteHTTPResponse(w, "", 401)
+	}
+	token, err := auth.MakeJWT(refresh.UserID, s.key, s.cfg.Default_Expiry)
+	if err != nil {
+		WriteHTTPResponse(w, "", 500)
+		return
+	}
+	respBody := RefreshResponse {
+		Token: token,
+	}
+	WriteJSONResponse(w, respBody, 200, -1)
 }
 
 func (s *state) serveLogin(w http.ResponseWriter, r *http.Request) {
@@ -237,16 +284,29 @@ func (s *state) serveLogin(w http.ResponseWriter, r *http.Request) {
 		WriteJSONResponse(w, respBody, 401, 500)
 		return
 	}
-	if newUser.Expires_in_seconds == 0 {
-		newUser.Expires_in_seconds = s.cfg.Default_Expiry
+	token, err := auth.MakeJWT(user.ID, s.key, s.cfg.Default_Expiry)
+	if err != nil {
+		WriteHTTPResponse(w, "", 500)
+		return
 	}
-	token, err := auth.MakeJWT(user.ID, s.key, newUser.Expires_in_seconds)
+	refresh, err := s.db.GetRefreshByUserID(r.Context(), user.ID)
+	if err == sql.ErrNoRows {
+		refreshT := auth.MakeRefreshToken()
+		curTime := time.Now()
+		expireTime := curTime.Add(60 * time.Hour)
+		refresh, err = s.db.AddRefresh(r.Context(), database.AddRefreshParams{ Token: refreshT, CreatedAt: curTime, UpdatedAt: curTime, UserID: user.ID, ExpiresAt: expireTime})
+		if err != nil {
+			WriteHTTPResponse(w, "", 501)
+			return
+		}
+	}
 	respBody := CleanUser {
 		ID: user.ID,
 		CreatedAt: user.CreatedAt,
 		UpdatedAt: user.UpdatedAt,
 		Email: user.Email,
 		Token: token,
+		Refresh: refresh.Token,
 	}
 	WriteJSONResponse(w, respBody, 200, -1)
 }
@@ -328,5 +388,12 @@ func WriteHTTPResponse(w http.ResponseWriter, reason string, code int) {
 	w.WriteHeader(code)
 	if reason != "" {
 		w.Write([]byte(reason))
+	}
+}
+
+func NewValidTime(t time.Time) sql.NullTime {
+	return sql.NullTime{
+		Time: t,
+		Valid: true,
 	}
 }

@@ -9,6 +9,8 @@ import (
 	"github.com/google/uuid"
 	"net/http"
 	"strings"
+	"crypto/rand"
+	"encoding/hex"
 )
 
 func HashPassword(password string) (string, error) {
@@ -74,4 +76,10 @@ func ValidateJWT(tokenString, tokenSecret string) (uuid.UUID, error) {
 		return uuid.Nil, errors.New("invalid id")
 	}
 	return id, nil
+}
+
+func MakeRefreshToken() string{
+	key := make([]byte, 32)
+	rand.Read(key)
+	return hex.EncodeToString(key)
 }
