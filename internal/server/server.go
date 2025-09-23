@@ -20,6 +20,13 @@ type RefreshResponse struct {
 	Token string `json:"token"`
 }
 
+type UpdateUser struct {
+	ID uuid.UUID `json:"user_id"`
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
+	Email string `json:"email"`
+}
+
 type CleanUser struct {
 	ID uuid.UUID `json:"user_id"`
 	CreatedAt time.Time `json:"created_at"`
@@ -32,6 +39,7 @@ type CleanUser struct {
 type UserLoginPost struct {
 	Password string `json:"password"`
 	Email string `json:"email"`
+	Token string `json:"token,omitempty"`
 }
 
 type Newchirp struct {
@@ -199,6 +207,7 @@ func StartServer(dbURL string, devEnv string, key string) {
 	mux.HandleFunc("POST /api/login", curState.serveLogin)
 	mux.HandleFunc("POST /api/refresh", curState.serveRefresh)
 	mux.HandleFunc("POST /api/revoke", curState.serveRevoke)
+	mux.HandleFunc("PUT /api/users", curState.serveUserUpdate)
 	server := http.Server{}
 	server.Handler = mux
 	server.Addr = ":8085"
@@ -207,6 +216,56 @@ func StartServer(dbURL string, devEnv string, key string) {
 		fmt.Println("There was an error, but wtf?")
 	}
 	fmt.Println("Am I still running?")
+}
+
+func (s *state)serveUserUpdate(w http.ResponseWriter, r *http.Request) {
+	accessToken, err := auth.GetBearerToken(r.Header)
+	if err != nil {
+		WriteHTTPResponse(w, "", 401)
+		return
+	}
+	user, err := auth.ValidateJWT(accessToken, s.key)
+	if err != nil {
+		WriteHTTPResponse(w, "", 401)
+	}
+	decoder := json.NewDecoder(r.Body)
+	newUser := UserLoginPost{}
+	err = decoder.Decode(&newUser)
+	if err != nil {
+		respBody := BadChirp{
+			Error: "Malformed Post request",
+		}
+		WriteJSONResponse(w, respBody, 422, 500)
+		return
+	}
+	if len(newUser.Password) < 5 {
+		respBody := BadChirp{
+			Error: "Password length below minimum",
+		}
+		WriteJSONResponse(w, respBody, 422, 500)
+		return
+	}
+	hashWord, err := auth.HashPassword(newUser.Password)
+	if err != nil {
+		respBody := BadChirp{
+			Error: "Error processing password",
+		}
+		WriteJSONResponse(w, respBody, 422, 500)
+		return
+	}
+	updated, err:= s.db.UpdateUser(r.Context(), database.UpdateUserParams{ ID: user, Email:newUser.Email, HashedPassword: hashWord, UpdatedAt: time.Now()})
+	if err != nil {
+		fmt.Printf("error updating user: %v\n", err)
+		WriteHTTPResponse(w, "", 401)
+		return
+	}
+	response := UpdateUser{}
+	response.ID = user
+	response.CreatedAt = updated.CreatedAt
+	response.UpdatedAt = updated.UpdatedAt
+	response.Email = updated.Email
+	WriteJSONResponse(w, response, 200, -1)
+	return
 }
 
 func (s *state)serveRevoke(w http.ResponseWriter, r *http.Request) {
@@ -388,4 +447,16 @@ func NewValidTime(t time.Time) sql.NullTime {
 		Time: t,
 		Valid: true,
 	}
+}
+
+func ValidateResponseToken(secret, testToken string, r *http.Request) uuid.UUID {
+	accessToken, err := auth.GetBearerToken(r.Header)
+	if err != nil {
+		return uuid.UUID{}
+	}
+	user, err := auth.ValidateJWT(accessToken, secret)
+	if err != nil {
+		return uuid.UUID{}
+	}
+	return user
 }
