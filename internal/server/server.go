@@ -208,6 +208,7 @@ func StartServer(dbURL string, devEnv string, key string) {
 	mux.HandleFunc("POST /api/refresh", curState.serveRefresh)
 	mux.HandleFunc("POST /api/revoke", curState.serveRevoke)
 	mux.HandleFunc("PUT /api/users", curState.serveUserUpdate)
+	mux.HandleFunc("DELETE /api/chirps/{chirpID}", curState.deleteChirp)
 	server := http.Server{}
 	server.Handler = mux
 	server.Addr = ":8085"
@@ -216,6 +217,41 @@ func StartServer(dbURL string, devEnv string, key string) {
 		fmt.Println("There was an error, but wtf?")
 	}
 	fmt.Println("Am I still running?")
+}
+
+func (s *state)deleteChirp(w http.ResponseWriter, r *http.Request) {
+	chirpID, err:= GetUUID(r.PathValue("chirpID"))
+	if err != nil {
+		log.Printf("Error getting chirp ID from header: %v", err)
+		WriteHTTPResponse(w, "", 404)
+		return
+	}	
+	token, err := auth.GetBearerToken(r.Header)
+	if err != nil {
+		WriteHTTPResponse(w, "", 401)
+		return
+	}
+	userID, err := auth.ValidateJWT(token, s.key)
+	if err != nil {
+		WriteHTTPResponse(w, "", 403)
+		return
+	}
+	retChirp, err := s.db.GetChirp(r.Context(), chirpID)
+	if err != nil {
+		WriteHTTPResponse(w, "", 403)
+		return
+	}
+	if retChirp.UserID != userID {
+		WriteHTTPResponse(w, "", 403)
+		return
+	}
+	count, err := s.db.DeleteChirp(r.Context(), chirpID)
+	if err != nil || count != 1 {
+		WriteHTTPResponse(w, "", 404)
+		return
+	}
+	WriteHTTPResponse(w, "", 204)
+	return
 }
 
 func (s *state)serveUserUpdate(w http.ResponseWriter, r *http.Request) {
