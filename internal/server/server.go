@@ -16,6 +16,14 @@ import (
 	"errors"
 	"github.com/itstwoam/chirpy/internal/auth"
 )
+
+type Upgrade struct {
+	Event string `json:"event"`
+	Data struct {
+		UserID uuid.UUID `json:"user_id"`
+	} `json:"data"`
+}
+
 type RefreshResponse struct {
 	Token string `json:"token"`
 }
@@ -25,6 +33,7 @@ type UpdateUser struct {
 	CreatedAt time.Time `json:"created_at"`
 	UpdatedAt time.Time `json:"updated_at"`
 	Email string `json:"email"`
+	IsChirpyRed bool `json:"is_chirpy_red"`
 }
 
 type CleanUser struct {
@@ -34,6 +43,7 @@ type CleanUser struct {
 	Email string `json:"email"`
 	Token string `json:"token"`
 	Refresh string `json:"refresh_token"`
+	IsChirpyRed bool `json:"is_chirpy_red"`
 }
 
 type UserLoginPost struct {
@@ -52,11 +62,12 @@ type BadChirp struct {
 }
 
 type state struct {
-	db *database.Queries //`json:"db"`
-	cfg *config.Config //`json:"cfg"`
-	fileserverHits atomic.Int32 //`json:"fileserverHits"`
-	environType string //`json:"environtype"`
-	key string //`json:"key"`
+	db *database.Queries 
+	cfg *config.Config 
+	fileserverHits atomic.Int32 
+	environType string 
+	key string 
+	polka_key string
 }
 	
 var blacklist = []string {"kerfuffle", "sharbert", "fornax"}
@@ -182,10 +193,11 @@ func (s *state) serveChirp(w http.ResponseWriter, r *http.Request) {
 	return
 }
 
-func StartServer(dbURL string, devEnv string, key string) {
+func StartServer(dbURL, devEnv, key, polka_key string) {
 	var curState state
 	curState.environType = devEnv
 	curState.key = key
+	curState.polka_key = polka_key
 	var err error
 	curState.cfg, err = config.Read()
 	if err != nil{
@@ -209,6 +221,7 @@ func StartServer(dbURL string, devEnv string, key string) {
 	mux.HandleFunc("POST /api/revoke", curState.serveRevoke)
 	mux.HandleFunc("PUT /api/users", curState.serveUserUpdate)
 	mux.HandleFunc("DELETE /api/chirps/{chirpID}", curState.deleteChirp)
+	mux.HandleFunc("POST /api/polka/webhooks", curState.serveRed)
 	server := http.Server{}
 	server.Handler = mux
 	server.Addr = ":8085"
@@ -217,6 +230,37 @@ func StartServer(dbURL string, devEnv string, key string) {
 		fmt.Println("There was an error, but wtf?")
 	}
 	fmt.Println("Am I still running?")
+}
+
+func (s *state)serveRed(w http.ResponseWriter, r *http.Request) {
+	hKey, err := auth.GetAPIKey(r.Header)
+	if err != nil || hKey != s.polka_key {
+		WriteHTTPResponse(w, "", 401)
+	}
+	redReq, err := DecodeJSON(Upgrade{}, r)
+	if err != nil {
+		WriteHTTPResponse(w, "", 500)
+		return
+	}
+	if redReq.Event != "user.upgraded" {
+		WriteHTTPResponse(w, "", 204)
+		return
+	}
+	_, err = s.db.GetUser(r.Context(), redReq.Data.UserID)
+	if err != nil {
+		WriteHTTPResponse(w, "", 404)
+		return
+	}
+	madeRed, err := s.db.MakeRed(r.Context(), redReq.Data.UserID)
+	if err != nil {
+		WriteHTTPResponse(w, "", 500)
+		return
+	}
+	if madeRed != 1 {
+		WriteHTTPResponse(w, "", 500)
+		return
+	}
+	WriteHTTPResponse(w, "", 204)
 }
 
 func (s *state)deleteChirp(w http.ResponseWriter, r *http.Request) {
@@ -300,6 +344,7 @@ func (s *state)serveUserUpdate(w http.ResponseWriter, r *http.Request) {
 	response.CreatedAt = updated.CreatedAt
 	response.UpdatedAt = updated.UpdatedAt
 	response.Email = updated.Email
+	response.IsChirpyRed = updated.IsChirpyRed
 	WriteJSONResponse(w, response, 200, -1)
 	return
 }
@@ -403,6 +448,7 @@ func (s *state) serveLogin(w http.ResponseWriter, r *http.Request) {
 		Email: user.Email,
 		Token: token,
 		Refresh: refresh.Token,
+		IsChirpyRed: user.IsChirpyRed,
 	}
 	WriteJSONResponse(w, respBody, 200, -1)
 }
@@ -495,4 +541,11 @@ func ValidateResponseToken(secret, testToken string, r *http.Request) uuid.UUID 
 		return uuid.UUID{}
 	}
 	return user
+}
+
+func DecodeJSON[T any](t T, r *http.Request) (T, error) {
+	decoder := json.NewDecoder(r.Body)
+	var newObject T
+	err := decoder.Decode(&newObject)
+	return newObject, err
 }

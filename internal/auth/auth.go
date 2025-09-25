@@ -45,12 +45,7 @@ func MakeJWT(userID uuid.UUID, tokenSecret string, expiresIn int) (string, error
 }
 
 func GetBearerToken(headers http.Header) (string, error) {
-	bToken := headers["Authorization"]
-	if bToken == nil {
-		return "", errors.New("Invalid/missing bearer token")
-	}
-	sstrings := strings.Split(bToken[0], " ")
-	return strings.TrimSpace(sstrings[1]), nil
+	return findKeyOfType(headers, "Bearer")
 }
 
 func ValidateJWT(tokenString, tokenSecret string) (uuid.UUID, error) {
@@ -82,4 +77,27 @@ func MakeRefreshToken() string{
 	key := make([]byte, 32)
 	rand.Read(key)
 	return hex.EncodeToString(key)
+}
+
+func GetAPIKey(headers http.Header) (string, error) {
+	return findKeyOfType(headers, "ApiKey")
+}
+
+func findKeyOfType(headers http.Header, keyType string) (string, error) {
+	tokens := headers["Authorization"]
+	if tokens == nil {
+		return "", errors.New("Invalid/missing "+ keyType+ " token")
+	}
+	bToken := ""
+	for i := range(tokens) {
+		if strings.HasPrefix(tokens[i], keyType){
+			bToken = tokens[i]
+			break
+		}
+	}
+	if bToken == "" {
+		return "", errors.New("Invalid/missing "+ keyType+ " token")
+	}
+	sstrings := strings.Split(bToken, " ")
+	return strings.TrimSpace(sstrings[1]), nil
 }
