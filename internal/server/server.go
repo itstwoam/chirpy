@@ -104,10 +104,23 @@ func (s *state) serveReset(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *state) getChirps(w http.ResponseWriter, r *http.Request) {
-	allChirps, err := s.db.GetChirps(r.Context())
-	if err != nil {
-		fmt.Println("error while retrieving chirps")
-		return
+	sID := r.URL.Query().Get("author_id")
+	aID, err := uuid.Parse(sID) 
+	var allChirps []database.Chirp
+	if err == nil && aID != uuid.Nil {
+		retChirps, err := s.db.GetChirpsByUserID(r.Context(), aID)
+		if err != nil {
+			WriteHTTPResponse(w, "", http.StatusInternalServerError)
+			return
+		}
+		allChirps = retChirps
+	}else {
+		retChirps, err := s.db.GetChirps(r.Context())
+		if err != nil {
+			WriteHTTPResponse(w, "", http.StatusInternalServerError)
+			return
+		}
+		allChirps = retChirps
 	}
 	WriteJSONResponse(w, allChirps, 200, -1)
 	return
